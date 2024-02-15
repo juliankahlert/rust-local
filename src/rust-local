@@ -1,0 +1,475 @@
+#!/bin/sh
+#
+# MIT LICENSE:
+#
+# Copyright 2024 Julian Kahlert
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom
+# the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+# FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+# THE USE OR OTHER DEALINGS IN THE SOFTWARE
+
+VERSION=0.1.0
+
+RUST_URL='https://sh.rustup.rs'
+FORCE=0
+
+CURL="$(command -v curl)"
+UNAME="$(command -v uname)"
+RUSTUP=''
+
+REMOVE=''
+REMOVE_FAIL=''
+
+RUSTUP_HOME=''
+CARGO_HOME=''
+
+RUST_PROFILE=''
+RUST_TARGET_ARCH=''
+RUST_TARGET_VENDOR=''
+RUST_TARGET_SYS=''
+RUST_TARGET_ABI=''
+RUST_TARGET_TC=''
+RUST_HOST_TRIPLE=''
+RUST_TOOLCHAIN=''
+
+EMERGENCY=0
+ALERT=1
+CRITICAL=2
+ERROR=3
+WARNING=4
+NOTICE=5
+INFO=6
+DEBUG=7
+
+DEBUG_LEVEL=5
+
+log()
+{
+	local msg=''
+	local lvl=7
+	local out=1
+
+	test -n "$1" && msg="$1"
+	test -n "$2" && lvl=$2
+
+	test -n "$msg" || return
+	test $lvl -gt $DEBUG_LEVEL && return
+	test $lvl -lt $WARNING && out=2
+
+	case $lvl in
+	0) echo -n '[EMERGENCY]: ' ;;
+	1) echo -n '[ALERT]    : ' ;;
+	2) echo -n '[CRITICAL] : ' ;;
+	3) echo -n '[ERROR]    : ' ;;
+	4) echo -n '[WARNING]  : ' ;;
+	5) echo -n '[NOTICE]   : ' ;;
+	6) echo -n '[INFO]     : ' ;;
+	7) echo -n '[DEBUG]    : ' ;;
+	*) echo -n '[ERROR]    : ' ;;
+	esac
+
+	echo -e "$msg" >&$out
+
+	return 0
+}
+
+cleanup()
+{
+	test -n "$REMOVE" && rm --force $REMOVE
+
+	return 0
+}
+
+die()
+{
+	local msg=''
+	local code=-1
+
+	test -n "$1" && msg="$1"
+	test -n "$2" && code=$2
+
+	cleanup
+	test -n "$REMOVE_FAIL" && rm --force --recursive $REMOVE_FAIL
+	test -n "$msg" && log "$msg" $ERROR
+
+	exit $code
+}
+
+ck_tools()
+{
+	log 'Checking dependencies...' $DEBUG
+
+	test -n "$UNAME" || die "uname not found"
+	test -n "$CURL" || die "curl not found"
+
+	log 'Done!' $DEBUG
+	return 0
+}
+
+init_target()
+{
+	log 'Set Target...' $NOTICE
+
+	test -n "$RUST_PROFILE" || RUST_PROFILE='default'
+	test -n "$RUST_TARGET_ARCH" || RUST_TARGET_ARCH="$($UNAME --machine)"
+	test -n "$RUST_TARGET_VENDOR" || RUST_TARGET_VENDOR='unknown'
+	test -n "$RUST_TARGET_ABI" || RUST_TARGET_ABI='gnu'
+	test -n "$RUST_TARGET_SYS" || RUST_TARGET_SYS='linux'
+	test -n "$RUST_TARGET_TC" || RUST_TARGET_TC='stable'
+
+	log "\tPROFILE  : $RUST_PROFILE" $NOTICE
+	log "\tARCH     : $RUST_TARGET_ARCH" $NOTICE
+	log "\tVENDOR   : $RUST_TARGET_VENDOR" $NOTICE
+	log "\tSYS      : $RUST_TARGET_SYS" $NOTICE
+	log "\tABI      : $RUST_TARGET_ABI" $NOTICE
+	log "\tTOOLCHAIN: $RUST_TARGET_TC" $NOTICE
+
+	log 'Done!' $NOTICE
+	return 0
+}
+
+build_rust_tuple()
+{
+	local fn='build_rust_tuple'
+
+	test -n "$RUST_PROFILE" || die "fn: no profile"
+	test -n "$RUST_TARGET_ARCH" || die "fn: no arch"
+	test -n "$RUST_TARGET_VENDOR" || die "fn: no vendor"
+	test -n "$RUST_TARGET_ABI" || die "fn: no vendor"
+	test -n "$RUST_TARGET_SYS" || die "fn: no sys"
+	test -n "$RUST_TARGET_TC" || die "fn: no toolchain"
+
+	RUST_HOST_TRIPLE="$RUST_TARGET_ARCH-$RUST_TARGET_VENDOR-$RUST_TARGET_SYS-$RUST_TARGET_ABI"
+	RUST_TOOLCHAIN="$RUST_TARGET_TC"
+
+	log "HOST_TRIPLE: $RUST_HOST_TRIPLE" $NOTICE
+	log "TOOLCHAIN  : $RUST_TOOLCHAIN" $NOTICE
+
+	return 0
+}
+
+download()
+{
+	local url=''
+	local out='-S'
+	local proto='http'
+
+	test -n "$1" && url="$1"
+	test -n "$2" && out="-o $2"
+
+	case "$url" in
+	https*)
+		proto='https'
+		;;
+	*)
+		;;
+	esac
+
+	$CURL --fail         \
+              --proto $proto \
+	      --tlsv1.2      \
+	      --silent       \
+	      $out           \
+	      $url           \
+		|| return -1
+
+	return 0
+}
+
+get_rust_init()
+{
+	local fn='get_rust_init'
+	local tmp=''
+
+	log 'Download rustup...' $NOTICE
+
+	tmp=$(mktemp)
+
+	test -f "$tmp" || die "$fn: failed to create file"
+	REMOVE="$REMOVE $tmp"
+
+	test -n "$CURL" || die "$fn: curl not found"
+
+	download "$RUST_URL" "$tmp" || die "$fn: failed to get rustup"
+	RUSTUP="$tmp"
+
+	log 'Done!' $NOTICE
+	return 0
+}
+
+force_clean()
+{
+	local dir=''
+	local sub=''
+
+	test $FORCE -eq 0 && return 0
+
+	test -n "$1" && dir="$1"
+	test -n "$2" && sub="$2"
+
+	log "Force clean <$dir/$sub>" $NOTICE
+
+	test -n "$dir" || die "$fn: missing dir"
+
+	rm --force --recursive "$dir/$sub"
+
+	return 0
+}
+
+setup_dir()
+{
+	local fn='setup_dir'
+	local dir=''
+	local sub=''
+
+	test -n "$1" && dir="$1"
+	test -n "$2" && sub="$2"
+	test -n "$dir" || die "$fn: missing dir"
+	test -d "$dir" || REMOVE_FAIL="$REMOVE_FAIL $dir"
+	test -n "$sub" && dir="$dir/$sub"
+
+	log "Prepare dir <$dir>..." $NOTICE
+
+	mkdir --parents "$dir"
+
+	test -d "$dir" || die "$fn: could not create <$dir>"
+
+	REMOVE_FAIL="$REMOVE_FAIL $dir"
+	log 'Done!' $NOTICE
+	return 0
+}
+
+rustup_init()
+{
+	local fn='rustup_init'
+	local rh=''
+
+	test -f "$RUSTUP" || die "$fn: rustup not found"
+
+	test -n "$1" && rh="$1/.rust"
+	test -n "$rh" || die "$fn: RUSTUP_HOME dir not found <$rh>"
+
+	log "Install Rust to <$1>..." $NOTICE
+
+	path_remove_rust
+	export PATH
+	export RUSTUP_HOME="$(realpath $rh)"
+	export CARGO_HOME="$(realpath $rh)"
+
+	/bin/sh $RUSTUP -y                                    \
+		--default-host "$RUST_HOST_TRIPLE"            \
+		--default-toolchain "$RUST_TOOLCHAIN"         \
+		--no-modify-path                              \
+		--quiet                                       \
+		> /dev/null 2>&1                              \
+		|| die "$fn: rustup failed"
+
+	echo "$RUST_TOOLCHAIN" > "$1/.rusttc"
+
+	test -f ${RUSTUP_HOME}/bin/rustup || die "$fn: rustup not found"
+	test -f ${RUSTUP_HOME}/env || die "$fn: rust env not found"
+
+	(
+		. ${RUSTUP_HOME}/env
+		export PATH
+		export HOME=$(realpath $PRJ_DIR)
+		log "Init rustup <$HOME>" $NOTICE
+		${RUSTUP_HOME}/bin/rustup default "$RUST_TOOLCHAIN"  > /dev/null 2>&1
+	)
+
+	log "Done!" $NOTICE
+	return 0
+}
+
+path_remove_rust()
+{
+	local clean=no
+	local cargo_d=''
+	local rustc_d=''
+
+	while test $clean = no
+	do
+		clean=yes
+
+		cargo_d="$(command -v cargo)"
+		if test -n "$cargo_d"
+		then
+			cargo_d="$(dirname $cargo_d)"
+
+			if (echo "$PATH" | grep -q -i "$cargo_d")
+			then
+				clean=no
+				PATH=$(echo "$PATH" | sed "s#$cargo_d##g")
+			fi
+		fi
+
+		rustc_d="$(command -v rustc)"
+		if test -n "$rustc_d"
+		then
+			rustc_d="$(dirname $rustc_d)"
+
+			if (echo "$PATH" | grep -q -i "$rustc_d")
+			then
+				clean=no
+				PATH=$(echo "$PATH" | sed "s#$rustc_d##g")
+			fi
+		fi
+
+		PATH=$(echo "$PATH" | sed "s#::#:#g")
+
+	done
+}
+
+chdir()
+{
+	test -n "$RUST_CH" && cd "$RUST_CH"
+}
+
+usage()
+{
+	echo "$(basename $0) v$VERSION"
+	echo ''
+	echo 'Helper program to ceate folder local rust installations.'
+	echo ''
+	echo "$(basename $0) [options] directory"
+	echo 'Usage:'
+	echo '  --init            : Initialize target dir.'
+	echo '  --force           : If init force reinit'
+	echo '  --shell           : Open a rust shell'
+	echo '  --cmd             : Execute in a rust shell'
+	echo '  --profile <VALUE> : Rust profile.             Default: default'
+	echo '  --vendor <VALUE>  : Rust target vendor.       Default: unknown'
+	echo '  --sys <VALUE>     : Rust target system.       Default: linux'
+	echo '  --abi <VALUE>     : Rust target ABI.          Default: gnu'
+	echo '  --arch <VALUE>    : Rust target arc.          Default: uname -m'
+	echo '  --version <VALUE> : Rust toolchain.           Default: stable'
+	echo ''
+	echo 'Example:'
+	echo "  $(basename $0) --init --version nightly my_rust_project"
+	echo "  $(basename $0) --shell my_rust_project"
+}
+
+while test -n "$1"
+do
+	case "$1" in
+	--profile|-P)
+		shift
+		RUST_PROFILE="$1"
+		;;
+	--vendor)
+		shift
+		RUST_TARGET_VENDOR="$1"
+		;;
+	--sys)
+		shift
+		RUST_TARGET_SYS="$1"
+		;;
+	--abi)
+		shift
+		RUST_TARGET_ABI="$1"
+		;;
+	--arch)
+		shift
+		RUST_TARGET_ARCH="$1"
+		;;
+	--version)
+		shift
+		RUST_TARGET_TC="$1"
+		;;
+	--force)
+		FORCE=1
+		;;
+	--init)
+		INIT='true'
+		;;
+	--shell)
+		RUST_SHELL='true'
+		;;
+	--cmd)
+		RUST_CMD="$2"
+		shift
+		;;
+	--ch)
+		RUST_CH="$(realpath $2)"
+		shift
+		;;
+	--usage | --help)
+		usage
+		exit 0
+		;;
+	*)
+		test -z "$PRJ_DIR" || die "Multiple dirs defined!"
+		PRJ_DIR="$1"
+		;;
+	esac
+	shift
+done
+
+
+path_remove_rust
+export PATH
+
+test -n "$PRJ_DIR" || PRJ_DIR="$PWD"
+
+ck_tools
+
+if test "$INIT" = 'true'
+then
+	init_target
+	build_rust_tuple
+	get_rust_init
+	force_clean "$PRJ_DIR" '.rust'
+	setup_dir "$PRJ_DIR" '.rust'
+	rustup_init "$PRJ_DIR"
+fi
+
+cleanup
+
+if test "$RUST_SHELL" = 'true'
+then
+	PRJ_DIR=$(realpath $PRJ_DIR)
+	(
+		cd $PRJ_DIR || return 1
+		path_remove_rust
+		. ".rust/env"
+		export PATH
+		export HOME=$PRJ_DIR
+		export CARGO_HOME="$HOME/.rust"
+		export RUSTUP_HOME="$HOME/.rust"
+		chdir
+		PS1='<rust $(rustc --version | cut -d " "  -f2):$(cargo --version | cut -d" " -f2)> $(basename \w)$ ' $SHELL
+	)
+fi
+
+if test -n "$RUST_CMD"
+then
+	PRJ_DIR=$(realpath $PRJ_DIR)
+	(
+		cd $PRJ_DIR || return 1
+		path_remove_rust
+		. ".rust/env"
+		export PATH
+		export HOME=$PRJ_DIR
+		export CARGO_HOME="$HOME/.rust"
+		export RUSTUP_HOME="$HOME/.rust"
+		chdir
+		$SHELL -c "$RUST_CMD"
+	)
+fi
+
+exit 0
+
