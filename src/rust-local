@@ -361,6 +361,7 @@ usage()
 	echo '  --init            : Initialize target dir.'
 	echo '  --force           : If init force reinit.'
 	echo '  --shell           : Open a rust shell.'
+	echo '  --build           : Run "cargo build".'
 	echo '  --cmd     <VALUE> : Execute in a rust shell.'
 	echo '  --git     <VALUE> : Clone a git reositoy and cd into it,'
 	echo '                      if a CMD is given run that cmd in CWD.'
@@ -420,6 +421,9 @@ do
 	--cmd)
 		shift
 		RUST_CMD="$1"
+		;;
+	--build)
+		RUST_CMD="cargo build"
 		;;
 	--ch)
 		shift
