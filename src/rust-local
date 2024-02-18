@@ -424,10 +424,10 @@ do
 		RUST_CMD="$1"
 		;;
 	--build)
-		RUST_CMD="cargo build"
+		RUST_BUILD_CMD="cargo build"
 		;;
 	--release)
-		RUST_CMD="cargo build --release"
+		RUST_BUILD_CMD="cargo build --release"
 		;;
 	--ch)
 		shift
@@ -482,8 +482,10 @@ then
 		chdir
 
 		cd $RUST_LOCAL_GIT_D || return 1
+		run_cmd "$RUST_BUILD_CMD"
 		run_cmd "$RUST_CMD"
 	)
+	RUST_BUILD_CMD=
 	RUST_CMD=
 fi
 
@@ -499,6 +501,7 @@ then
 		export CARGO_HOME="$HOME/.rust"
 		export RUSTUP_HOME="$HOME/.rust"
 		chdir
+		run_cmd "$RUST_BUILD_CMD"
 		run_cmd "$RUST_CMD"
 	)
 fi
