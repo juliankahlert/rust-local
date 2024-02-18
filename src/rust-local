@@ -341,6 +341,15 @@ chdir()
 	test -n "$RUST_CH" && cd "$RUST_CH"
 }
 
+run_cmd()
+{
+	local cmd="$1"
+
+	test -z "$cmd" && return
+
+	$SHELL -c "$cmd"
+}
+
 usage()
 {
 	echo "$(basename $0) v$VERSION"
@@ -465,7 +474,7 @@ then
 		chdir
 
 		cd $RUST_LOCAL_GIT_D || return 1
-		$SHELL -c "$RUST_CMD"
+		run_cmd "$RUST_CMD"
 	)
 	RUST_CMD=
 fi
@@ -482,7 +491,7 @@ then
 		export CARGO_HOME="$HOME/.rust"
 		export RUSTUP_HOME="$HOME/.rust"
 		chdir
-		$SHELL -c "$RUST_CMD"
+		run_cmd "$RUST_CMD"
 	)
 fi
 
