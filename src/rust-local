@@ -439,22 +439,6 @@ fi
 
 cleanup
 
-if test "$RUST_SHELL" = 'true'
-then
-	PRJ_DIR=$(realpath $PRJ_DIR)
-	(
-		cd $PRJ_DIR || return 1
-		path_remove_rust
-		. ".rust/env"
-		export PATH
-		export HOME=$PRJ_DIR
-		export CARGO_HOME="$HOME/.rust"
-		export RUSTUP_HOME="$HOME/.rust"
-		chdir
-		PS1='<rust $(rustc --version | cut -d " "  -f2):$(cargo --version | cut -d" " -f2)> $(basename \w)$ ' $SHELL
-	)
-fi
-
 if test -n "$RUST_CMD"
 then
 	PRJ_DIR=$(realpath $PRJ_DIR)
@@ -468,6 +452,22 @@ then
 		export RUSTUP_HOME="$HOME/.rust"
 		chdir
 		$SHELL -c "$RUST_CMD"
+	)
+fi
+
+if test "$RUST_SHELL" = 'true'
+then
+	PRJ_DIR=$(realpath $PRJ_DIR)
+	(
+		cd $PRJ_DIR || return 1
+		path_remove_rust
+		. ".rust/env"
+		export PATH
+		export HOME=$PRJ_DIR
+		export CARGO_HOME="$HOME/.rust"
+		export RUSTUP_HOME="$HOME/.rust"
+		chdir
+		PS1='<rust $(rustc --version | cut -d " "  -f2):$(cargo --version | cut -d" " -f2)> $(basename \w)$ ' $SHELL
 	)
 fi
 
