@@ -30,6 +30,7 @@ FORCE=0
 CURL="$(command -v curl)"
 UNAME="$(command -v uname)"
 GIT="$(command -v git)"
+TAR="$(command -v tar)"
 RUSTUP=''
 
 REMOVE=''
@@ -117,6 +118,7 @@ ck_tools()
 	test -n "$UNAME" || die "uname not found"
 	test -n "$CURL" || die "curl not found"
 	test -n "$GIT" || die "git not found"
+	test -n "$TAR" || die "tar not found"
 
 	log 'Done!' $DEBUG
 	return 0
@@ -350,6 +352,35 @@ run_cmd()
 	$SHELL -c "$cmd"
 }
 
+prepare_reproducible()
+{
+	test -z "$RUST_SRC_AR" && return
+
+	log "Setup reproducible build!" $NOTICE
+
+	if ! test -f "$RUST_SRC_AR"
+	then
+		log "Vendor sources..." $NOTICE
+		run_cmd "cargo vendor --versioned-dirs vendor.d"
+		${TAR} czf "$RUST_SRC_AR" vendor.d
+		log "Done!" $NOTICE
+	else
+		if ! test -f vendor.d/.extracted
+		then
+			rm --recursive --force vendor.d
+			log "Extract sources..." $NOTICE
+			${TAR} xzf "$RUST_SRC_AR"
+			mkdir --parents .cargo
+			echo '[source.crates-io]'                >> .cargo/config
+			echo 'replace-with = "vendored-sources"' >> .cargo/config
+			echo '[source.vendored-sources]'         >> .cargo/config
+			echo 'directory = "vendor.d"'            >> .cargo/config
+			touch vendor.d/.extracted
+			log "Done!" $NOTICE
+		fi
+	fi
+}
+
 usage()
 {
 	echo "$(basename $0) v$VERSION"
@@ -358,25 +389,31 @@ usage()
 	echo ''
 	echo "$(basename $0) [options] directory"
 	echo 'Usage:'
-	echo '  --init            : Initialize target dir.'
-	echo '  --force           : If init force reinit.'
-	echo '  --shell           : Open a rust shell.'
-	echo '  --build           : Run "cargo build".'
-	echo '  --release         : Run "cargo build --release".'
-	echo '  --cmd     <VALUE> : Execute in a rust shell.'
-	echo '  --git     <VALUE> : Clone a git reositoy and cd into it,'
-	echo '                      if a CMD is given run that cmd in CWD.'
-	echo '  --profile <VALUE> : Rust profile.             Default: default'
-	echo '  --vendor  <VALUE> : Rust target vendor.       Default: unknown'
-	echo '  --sys     <VALUE> : Rust target system.       Default: linux'
-	echo '  --abi     <VALUE> : Rust target ABI.          Default: gnu'
-	echo '  --arch    <VALUE> : Rust target arc.          Default: uname -m'
-	echo '  --version <VALUE> : Rust toolchain.           Default: stable'
+	echo '  --init                 : Initialize target dir.'
+	echo '  --force                : If init force reinit.'
+	echo '  --shell                : Open a rust shell.'
+	echo '  --build                : Run "cargo build".'
+	echo '  --release              : Run "cargo build --release".'
+	echo '  --reproducible <VALUE> : Use VALUE as a tar.gz containing'
+	echo '                         : the sources of all dependencys.'
+	echo '                         : If it does not exist create it.'
+	echo '                         : When running build/release use the'
+	echo '                         : `offline` and `frozen` flags.'
+	echo '  --cmd          <VALUE> : Execute in a rust shell.'
+	echo '  --git          <VALUE> : Clone a git reositoy and cd into it,'
+	echo '                         : if a CMD is given run that cmd in CWD.'
+	echo '  --profile      <VALUE> : Rust profile.        Default: default'
+	echo '  --vendor       <VALUE> : Rust target vendor.  Default: unknown'
+	echo '  --sys          <VALUE> : Rust target system.  Default: linux'
+	echo '  --abi          <VALUE> : Rust target ABI.     Default: gnu'
+	echo '  --arch         <VALUE> : Rust target arc.     Default: uname -m'
+	echo '  --version      <VALUE> : Rust toolchain.      Default: stable'
 	echo ''
 	echo 'Example:'
 	echo "  $(basename $0) local_rust.d --init --version nightly"
 	echo "  $(basename $0) local_rust.d --shell"
-	echo "  $(basename $0) local_rust.d --init --git https://github.com/hpaluch/rust-hello-world --cmd 'cargo build --release'"
+	echo "  $(basename $0) local_rust.d --init --git <repo> --build"
+	echo "  $(basename $0) local_rust.d --reproducible src.tar.gz --git <repo> --build"
 }
 
 while test -n "$1"
@@ -428,6 +465,11 @@ do
 		;;
 	--release)
 		RUST_BUILD_CMD="cargo build --release"
+		;;
+	--reproducible)
+		shift
+		RUST_SRC_AR="$(realpath $1)"
+		RUST_BUILD_CMD_EXTRA=' --offline --frozen'
 		;;
 	--ch)
 		shift
@@ -482,14 +524,16 @@ then
 		chdir
 
 		cd $RUST_LOCAL_GIT_D || return 1
-		run_cmd "$RUST_BUILD_CMD"
+
+		prepare_reproducible
+		run_cmd "$RUST_BUILD_CMD$RUST_BUILD_CMD_EXTRA"
 		run_cmd "$RUST_CMD"
 	)
 	RUST_BUILD_CMD=
 	RUST_CMD=
 fi
 
-if test -n "$RUST_CMD"
+if test -n "$RUST_CMD" || test -n "$RUST_BUILD_CMD"
 then
 	PRJ_DIR=$(realpath $PRJ_DIR)
 	(
@@ -501,7 +545,9 @@ then
 		export CARGO_HOME="$HOME/.rust"
 		export RUSTUP_HOME="$HOME/.rust"
 		chdir
-		run_cmd "$RUST_BUILD_CMD"
+
+		prepare_reproducible
+		run_cmd "$RUST_BUILD_CMD$RUST_BUILD_CMD_EXTRA"
 		run_cmd "$RUST_CMD"
 	)
 fi
@@ -518,6 +564,8 @@ then
 		export CARGO_HOME="$HOME/.rust"
 		export RUSTUP_HOME="$HOME/.rust"
 		chdir
+
+		prepare_reproducible
 		PS1='<rust $(rustc --version | cut -d " "  -f2):$(cargo --version | cut -d" " -f2)> $(basename \w)$ ' $SHELL
 	)
 fi
