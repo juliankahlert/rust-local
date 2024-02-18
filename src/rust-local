@@ -362,6 +362,7 @@ usage()
 	echo '  --force           : If init force reinit.'
 	echo '  --shell           : Open a rust shell.'
 	echo '  --build           : Run "cargo build".'
+	echo '  --release         : Run "cargo build --release".'
 	echo '  --cmd     <VALUE> : Execute in a rust shell.'
 	echo '  --git     <VALUE> : Clone a git reositoy and cd into it,'
 	echo '                      if a CMD is given run that cmd in CWD.'
@@ -424,6 +425,9 @@ do
 		;;
 	--build)
 		RUST_CMD="cargo build"
+		;;
+	--release)
+		RUST_CMD="cargo build --release"
 		;;
 	--ch)
 		shift
