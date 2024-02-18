@@ -29,6 +29,7 @@ FORCE=0
 
 CURL="$(command -v curl)"
 UNAME="$(command -v uname)"
+GIT="$(command -v git)"
 RUSTUP=''
 
 REMOVE=''
@@ -115,6 +116,7 @@ ck_tools()
 
 	test -n "$UNAME" || die "uname not found"
 	test -n "$CURL" || die "curl not found"
+	test -n "$GIT" || die "git not found"
 
 	log 'Done!' $DEBUG
 	return 0
@@ -348,19 +350,22 @@ usage()
 	echo "$(basename $0) [options] directory"
 	echo 'Usage:'
 	echo '  --init            : Initialize target dir.'
-	echo '  --force           : If init force reinit'
-	echo '  --shell           : Open a rust shell'
-	echo '  --cmd             : Execute in a rust shell'
+	echo '  --force           : If init force reinit.'
+	echo '  --shell           : Open a rust shell.'
+	echo '  --cmd     <VALUE> : Execute in a rust shell.'
+	echo '  --git     <VALUE> : Clone a git reositoy and cd into it,'
+	echo '                      if a CMD is given run that cmd in CWD.'
 	echo '  --profile <VALUE> : Rust profile.             Default: default'
-	echo '  --vendor <VALUE>  : Rust target vendor.       Default: unknown'
-	echo '  --sys <VALUE>     : Rust target system.       Default: linux'
-	echo '  --abi <VALUE>     : Rust target ABI.          Default: gnu'
-	echo '  --arch <VALUE>    : Rust target arc.          Default: uname -m'
+	echo '  --vendor  <VALUE> : Rust target vendor.       Default: unknown'
+	echo '  --sys     <VALUE> : Rust target system.       Default: linux'
+	echo '  --abi     <VALUE> : Rust target ABI.          Default: gnu'
+	echo '  --arch    <VALUE> : Rust target arc.          Default: uname -m'
 	echo '  --version <VALUE> : Rust toolchain.           Default: stable'
 	echo ''
 	echo 'Example:'
-	echo "  $(basename $0) --init --version nightly my_rust_project"
-	echo "  $(basename $0) --shell my_rust_project"
+	echo "  $(basename $0) local_rust.d --init --version nightly"
+	echo "  $(basename $0) local_rust.d --shell"
+	echo "  $(basename $0) local_rust.d --init --git https://github.com/hpaluch/rust-hello-world --cmd 'cargo build --release'"
 }
 
 while test -n "$1"
@@ -399,13 +404,17 @@ do
 	--shell)
 		RUST_SHELL='true'
 		;;
-	--cmd)
-		RUST_CMD="$2"
+	--git)
 		shift
+		RUST_LOCAL_GIT="$1"
+		;;
+	--cmd)
+		shift
+		RUST_CMD="$1"
 		;;
 	--ch)
-		RUST_CH="$(realpath $2)"
 		shift
+		RUST_CH="$(realpath $1)"
 		;;
 	--usage | --help)
 		usage
@@ -438,6 +447,28 @@ then
 fi
 
 cleanup
+
+if test -n "$RUST_LOCAL_GIT"
+then
+	PRJ_DIR=$(realpath $PRJ_DIR)
+	(
+		cd $PRJ_DIR || return 1
+		RUST_LOCAL_GIT_D=$(basename "$RUST_LOCAL_GIT")
+		${GIT} clone "$RUST_LOCAL_GIT" "$RUST_LOCAL_GIT_D"
+
+		path_remove_rust
+		. ".rust/env"
+		export PATH
+		export HOME=$PRJ_DIR
+		export CARGO_HOME="$HOME/.rust"
+		export RUSTUP_HOME="$HOME/.rust"
+		chdir
+
+		cd $RUST_LOCAL_GIT_D || return 1
+		$SHELL -c "$RUST_CMD"
+	)
+	RUST_CMD=
+fi
 
 if test -n "$RUST_CMD"
 then
